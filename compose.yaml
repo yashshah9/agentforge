@@ -1,0 +1,73 @@
+services:
+  agentbox:
+    build:
+      context: ../agentbox
+      dockerfile: docker/Dockerfile
+      target: runtime
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: agentforge
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d agentforge"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  agentforge:
+    build:
+      context: ..
+      dockerfile: agentforge/docker/Dockerfile
+      target: runtime
+    ports:
+      - "8090:8090"
+    environment:
+      AGENTFORGE_HOST: 0.0.0.0
+      AGENTFORGE_PORT: 8090
+      AGENTFORGE_AGENTBOX_URL: http://agentbox:8080
+      AGENTFORGE_FIXTURES_ROOT: /app/fixtures
+      AGENTFORGE_WORK_ROOT: /tmp/agentforge-work
+      AGENTFORGE_AUTH_DRIVER: api_key
+      AGENTFORGE_AUDIT_DRIVER: postgres
+      AGENTFORGE_QUEUE_DRIVER: redis
+      AGENTFORGE_REDIS_URL: redis://redis:6379/0
+      AGENTFORGE_POSTGRES_DSN: postgresql://postgres:postgres@postgres:5432/agentforge
+      AGENTFORGE_API_KEYS: "dev-key:demo-tenant,other-key:other-tenant"
+      AGENTFORGE_ADMIN_KEYS: admin-key
+    depends_on:
+      agentbox:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+
+  integration:
+    build:
+      context: ..
+      dockerfile: agentforge/docker/Dockerfile
+      target: test
+    environment:
+      AGENTFORGE_BASE_URL: http://agentforge:8090
+      AGENTFORGE_AGENTBOX_URL: http://agentbox:8080
+      RUN_DOCKER_INTEGRATION: "1"
+    depends_on:
+      agentforge:
+        condition: service_healthy
+    command: ["pytest", "tests/test_integration_docker.py", "-v"]
