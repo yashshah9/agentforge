@@ -1,0 +1,45 @@
+# Architecture
+
+## Trust boundaries
+
+```
+┌──────────────────────────── control plane (trusted) ──────────────────────────┐
+│  API ──► queue ──► worker/pipeline                                              │
+│    │         policy (prompt injection, path allowlist)                         │
+│    │         audit (platformkit)                                               │
+│    └──► GitHub API (token stays here) ── draft PR only                         │
+└───────────────────────────────────────┬────────────────────────────────────────┘
+                                        │ embed sources + run unittest
+                                        ▼
+                          ┌── agentbox sandbox (untrusted) ──┐
+                          │  no GitHub token                 │
+                          │  network isolation when host OK  │
+                          └──────────────────────────────────┘
+```
+
+## Run state machine
+
+`queued → planning → coding → testing → awaiting_approval → done|failed`
+
+Merge never happens automatically. Approval is an explicit API call after the draft PR exists.
+
+## Draft PR publishing
+
+| Mode | When | Result |
+|------|------|--------|
+| `local` | no `AGENTFORGE_GITHUB_TOKEN` | `local://draft-pr/<run_id>` |
+| `github` | token set | branch `agentforge/<id>` + **draft** PR via Git Data API |
+
+For `fixture://` runs, set `AGENTFORGE_GITHUB_MIRROR_REPO=owner/repo` so patches land on a real repository.
+
+Token sources: classic/fine-grained PAT, or a GitHub App **installation token** minted outside the process and passed as `AGENTFORGE_GITHUB_TOKEN`.
+
+## Eval gate
+
+`evals/cases.json` drives offline golden scenarios (happy path, policy deny, sandbox fail, unknown fixture).
+
+```bash
+agentforge eval --min-pass-rate 1.0
+```
+
+CI runs the same gate. A regression that breaks policy or the happy path fails the build.

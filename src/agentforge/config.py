@@ -22,6 +22,13 @@ class Settings(BaseSettings):
     work_root: str = "/tmp/agentforge-work"
     sandbox_timeout_seconds: int = 30
     sandbox_memory_mb: int = 256
+    # GitHub draft PRs — empty token keeps local:// placeholders
+    github_token: str = ""
+    github_mirror_repo: str = ""  # owner/repo for fixture:// runs
+    github_base_branch: str = "main"
+    github_api_base: str = "https://api.github.com"
+    # Eval gate
+    eval_min_pass_rate: float = 1.0
 
     def api_key_map(self) -> dict[str, str]:
         out: dict[str, str] = {}

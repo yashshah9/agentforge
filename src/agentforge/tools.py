@@ -3,10 +3,20 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 from agentforge.policy import PolicyDenied, assert_safe_code, assert_safe_relpath
-from agentforge.sandbox.client import AgentboxClient
+
+
+class SupportsSandboxRun(Protocol):
+    def run(
+        self,
+        code: str,
+        *,
+        language: str = "python",
+        timeout_seconds: int | None = None,
+        memory_mb: int | None = None,
+    ) -> dict[str, Any]: ...
 
 
 def list_files(workspace: Path, rel_dir: str = ".") -> list[str]:
@@ -34,7 +44,7 @@ def write_file(workspace: Path, relpath: str, content: str) -> None:
 
 
 def run_pytest_in_sandbox(
-    client: AgentboxClient,
+    client: SupportsSandboxRun,
     workspace: Path,
     *,
     timeout_seconds: int = 30,

@@ -43,6 +43,7 @@ class Run:
     sandbox_backend: str | None = None
     network_isolated: bool | None = None
     pr_url: str | None = None
+    pr_mode: str | None = None  # github | local
     error: str | None = None
     workspace_path: str | None = None
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))

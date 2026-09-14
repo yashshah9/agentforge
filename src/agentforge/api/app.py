@@ -40,6 +40,7 @@ class RunResponse(BaseModel):
     sandbox_backend: str | None
     network_isolated: bool | None
     pr_url: str | None
+    pr_mode: str | None
     error: str | None
 
     @classmethod
@@ -59,6 +60,7 @@ class RunResponse(BaseModel):
             sandbox_backend=run.sandbox_backend,
             network_isolated=run.network_isolated,
             pr_url=run.pr_url,
+            pr_mode=run.pr_mode,
             error=run.error,
         )
 

@@ -108,6 +108,8 @@ def test_happy_path_approve(client: TestClient, monkeypatch: pytest.MonkeyPatch)
     assert got["test_exit_code"] == 0
     assert got["patch_summary"]
     assert got["pr_url"]
+    assert got["pr_mode"] == "local"
+    assert any(s["name"] == "draft_pr" for s in got["steps"])
 
     approved = client.post(
         f"/v1/runs/{run_id}/approval",

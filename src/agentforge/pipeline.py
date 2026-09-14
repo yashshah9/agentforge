@@ -3,14 +3,16 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Protocol
 
 import structlog
 
 from agentforge.domain.runs import Run, RunStatus, RunStep, RunStore
+from agentforge.github import DraftPRPublisher, build_publisher
 from agentforge.policy import PolicyDenied
 from agentforge.sandbox.client import AgentboxClient
-from agentforge.tools import list_files, read_file, run_pytest_in_sandbox, write_file
+from agentforge.tools import list_files, run_pytest_in_sandbox, write_file
+from agentforge.tools import read_file as read_workspace_file
 from agentforge.workspace import WorkspaceError, resolve_workspace
 
 if TYPE_CHECKING:
@@ -21,14 +23,34 @@ if TYPE_CHECKING:
 log = structlog.get_logger()
 
 
+class SandboxClient(Protocol):
+    def run(
+        self,
+        code: str,
+        *,
+        language: str = "python",
+        timeout_seconds: int | None = None,
+        memory_mb: int | None = None,
+    ) -> dict[str, Any]: ...
+
+    def close(self) -> None: ...
+
+
 def _fix_broken_counter(workspace: Path, issue: str) -> str:
     """Rule-based fixer for the broken_counter fixture."""
-    del issue  # keyword matching reserved for future LLM planner
+    del issue
     target = "counter.py"
-    src = read_file(workspace, target)
+    src = read_workspace_file(workspace, target)
     if "return n - 1" in src:
         write_file(workspace, target, src.replace("return n - 1", "return n + 1"))
         return "Replaced `return n - 1` with `return n + 1` in counter.py"
+    return "No automatic patch applied"
+
+
+def apply_fix(workspace: Path, repo_url: str, issue: str) -> str:
+    """Dispatch known fixture fixers. Extend here as fixtures grow."""
+    if repo_url.endswith("broken_counter") or "broken_counter" in repo_url:
+        return _fix_broken_counter(workspace, issue)
     return "No automatic patch applied"
 
 
@@ -44,9 +66,12 @@ def execute_pipeline(
     store: RunStore,
     settings: Settings,
     run: Run,
+    publisher: DraftPRPublisher | None = None,
+    sandbox_client: SandboxClient | None = None,
 ) -> None:
     work_root = Path(settings.work_root)
     work_root.mkdir(parents=True, exist_ok=True)
+    pub = publisher or build_publisher(settings)
 
     try:
         _maybe_deny_injection(run.issue)
@@ -56,6 +81,7 @@ def execute_pipeline(
             "List repository files",
             "Apply minimal fix for the reported issue",
             "Run tests in agentbox sandbox",
+            "Open draft pull request",
             "Await human approval",
         ]
         store.update(run.id, plan=plan)
@@ -66,12 +92,18 @@ def execute_pipeline(
         files = list_files(workspace)
         store.append_step(run.id, RunStep(name="list_files", status="ok", detail={"files": files}))
 
-        summary = _fix_broken_counter(workspace, run.issue)
+        summary = apply_fix(workspace, run.repo_url, run.issue)
         store.update(run.id, patch_summary=summary)
         store.append_step(run.id, RunStep(name="patch", status="ok", detail={"summary": summary}))
 
         store.update(run.id, status=RunStatus.TESTING)
-        client = AgentboxClient(settings.agentbox_url)
+        owns_client = False
+        client: SandboxClient
+        if sandbox_client is None:
+            client = AgentboxClient(settings.agentbox_url)
+            owns_client = True
+        else:
+            client = sandbox_client
         try:
             result = run_pytest_in_sandbox(
                 client,
@@ -80,7 +112,8 @@ def execute_pipeline(
                 memory_mb=settings.sandbox_memory_mb,
             )
         finally:
-            client.close()
+            if owns_client:
+                client.close()
 
         exit_code = int(result.get("exit_code", 1))
         store.update(
@@ -105,11 +138,7 @@ def execute_pipeline(
         )
 
         if exit_code != 0:
-            store.update(
-                run.id,
-                status=RunStatus.FAILED,
-                error="sandbox tests failed",
-            )
+            store.update(run.id, status=RunStatus.FAILED, error="sandbox tests failed")
             kit.audit.emit(
                 actor="system:worker",
                 action="run.tests_failed",
@@ -120,17 +149,41 @@ def execute_pipeline(
             )
             return
 
-        # Draft PR placeholder URL (GitHub App later)
-        pr_url = f"local://draft-pr/{run.id}"
+        draft = pub.publish(
+            run_id=run.id,
+            issue=run.issue,
+            patch_summary=summary,
+            workspace=workspace,
+            repo_url=run.repo_url,
+        )
+        store.append_step(
+            run.id,
+            RunStep(
+                name="draft_pr",
+                status="ok",
+                detail={
+                    "url": draft.url,
+                    "mode": draft.mode,
+                    "number": draft.number,
+                    "branch": draft.branch,
+                    "repo": draft.repo,
+                },
+            ),
+        )
         store.update(
             run.id,
             status=RunStatus.AWAITING_APPROVAL,
-            pr_url=pr_url,
+            pr_url=draft.url,
+            pr_mode=draft.mode,
         )
         kit.audit.emit(
             actor="system:worker",
             action="run.awaiting_approval",
-            payload={"pr_url": pr_url, "patch_summary": summary},
+            payload={
+                "pr_url": draft.url,
+                "pr_mode": draft.mode,
+                "patch_summary": summary,
+            },
             resource_type="run",
             resource_id=run.id,
             tenant_id=run.tenant_id,

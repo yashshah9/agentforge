@@ -1,0 +1,28 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install
+        run: |
+          python -m pip install -U pip
+          pip install "platformkit @ git+https://github.com/yashshah9/platformkit.git"
+          pip install -e ".[dev]"
+      - name: Lint
+        run: |
+          ruff check src tests
+          mypy src/agentforge
+      - name: Unit tests
+        run: pytest tests/test_api.py tests/test_github.py tests/test_evals.py -q
+      - name: Eval gate
+        run: agentforge eval --min-pass-rate 1.0
