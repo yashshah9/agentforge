@@ -10,6 +10,7 @@ uv pip install -e ../platformkit -e ".[dev]"
 uv run pytest tests/test_api.py tests/test_github.py tests/test_evals.py -q
 uv run agentforge eval --min-pass-rate 1.0 --baseline evals/baseline.json
 uv run agentforge serve   # :8090
+# Approvals console: http://127.0.0.1:8090/approvals
 ```
 
 ## Docker

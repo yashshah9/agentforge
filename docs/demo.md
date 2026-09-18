@@ -50,6 +50,8 @@ If GitHub is configured, open the draft PR in the browser — emphasize **draft*
 
 ## 3. Human approval + audit (1.5 min)
 
+Open **http://localhost:8090/approvals** (paste `dev-key`) or:
+
 ```bash
 curl -s -X POST localhost:8090/v1/runs/$RUN_ID/approval \
   -H "Authorization: Bearer dev-key" \

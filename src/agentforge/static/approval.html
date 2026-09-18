@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>agentforge — approvals</title>
+  <style>
+    :root {
+      --bg: #0f1419;
+      --panel: #1a222c;
+      --text: #e7ecf1;
+      --muted: #8b9aab;
+      --ok: #3d9a6a;
+      --bad: #c45c5c;
+      --line: #2a3542;
+      --accent: #5b8def;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "IBM Plex Sans", "Segoe UI", sans-serif;
+      background: radial-gradient(1200px 600px at 10% -10%, #1b2a3d 0%, var(--bg) 55%);
+      color: var(--text);
+      min-height: 100vh;
+    }
+    header {
+      padding: 1.5rem 1.75rem 0.75rem;
+      border-bottom: 1px solid var(--line);
+    }
+    header h1 {
+      margin: 0;
+      font-size: 1.35rem;
+      font-weight: 600;
+      letter-spacing: -0.02em;
+    }
+    header p { margin: 0.35rem 0 0; color: var(--muted); font-size: 0.9rem; }
+    main { padding: 1.25rem 1.75rem 2.5rem; max-width: 960px; }
+    .bar {
+      display: flex; flex-wrap: wrap; gap: 0.75rem; align-items: end;
+      margin-bottom: 1.25rem;
+    }
+    label { display: flex; flex-direction: column; gap: 0.3rem; font-size: 0.75rem; color: var(--muted); }
+    input {
+      background: var(--panel); border: 1px solid var(--line); color: var(--text);
+      border-radius: 6px; padding: 0.45rem 0.65rem; min-width: 220px; font: inherit;
+    }
+    button {
+      font: inherit; border: 0; border-radius: 6px; padding: 0.5rem 0.9rem; cursor: pointer;
+      background: var(--accent); color: #fff;
+    }
+    button.ghost { background: transparent; border: 1px solid var(--line); color: var(--text); }
+    button.ok { background: var(--ok); }
+    button.bad { background: var(--bad); }
+    button:disabled { opacity: 0.5; cursor: not-allowed; }
+    .run {
+      background: var(--panel); border: 1px solid var(--line); border-radius: 10px;
+      padding: 1rem 1.1rem; margin-bottom: 0.85rem;
+    }
+    .run h2 { margin: 0 0 0.35rem; font-size: 1rem; font-weight: 600; }
+    .meta { color: var(--muted); font-size: 0.82rem; margin-bottom: 0.75rem; }
+    .actions { display: flex; gap: 0.5rem; flex-wrap: wrap; }
+    .empty { color: var(--muted); padding: 2rem 0; }
+    .err { color: var(--bad); margin: 0.5rem 0 1rem; font-size: 0.9rem; }
+    code { font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 0.85em; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>agentforge</h1>
+    <p>Approve or reject runs awaiting human review. API key stays in this browser only.</p>
+  </header>
+  <main>
+    <div class="bar">
+      <label>API base
+        <input id="base" value="" placeholder="http://127.0.0.1:8090" />
+      </label>
+      <label>Bearer token
+        <input id="token" type="password" placeholder="dev-key" autocomplete="off" />
+      </label>
+      <button type="button" id="refresh" class="ghost">Refresh</button>
+    </div>
+    <div id="err" class="err" hidden></div>
+    <div id="list" class="empty">Enter a token and refresh to load runs.</div>
+  </main>
+  <script>
+    const $ = (id) => document.getElementById(id);
+    const defaultBase = location.origin.includes("8090") ? location.origin : "http://127.0.0.1:8090";
+    $("base").value = localStorage.getItem("af_base") || defaultBase;
+    $("token").value = localStorage.getItem("af_token") || "";
+
+    function showErr(msg) {
+      const el = $("err");
+      if (!msg) { el.hidden = true; el.textContent = ""; return; }
+      el.hidden = false; el.textContent = msg;
+    }
+
+    async function api(path, opts = {}) {
+      const base = $("base").value.replace(/\/$/, "");
+      const token = $("token").value.trim();
+      localStorage.setItem("af_base", base);
+      localStorage.setItem("af_token", token);
+      const res = await fetch(base + path, {
+        ...opts,
+        headers: {
+          "Authorization": "Bearer " + token,
+          "Content-Type": "application/json",
+          ...(opts.headers || {}),
+        },
+      });
+      const text = await res.text();
+      let body = null;
+      try { body = text ? JSON.parse(text) : null; } catch { body = { raw: text }; }
+      if (!res.ok) {
+        const detail = (body && (body.detail || body.message)) || res.statusText;
+        throw new Error(res.status + " " + detail);
+      }
+      return body;
+    }
+
+    async function approve(runId, yes) {
+      await api("/v1/runs/" + runId + "/approval", {
+        method: "POST",
+        body: JSON.stringify({ approve: yes, reason: yes ? null : "rejected from console" }),
+      });
+      await load();
+    }
+
+    function render(traces) {
+      const pending = (traces || []).filter((t) => t.status === "awaiting_approval");
+      const el = $("list");
+      if (!pending.length) {
+        el.className = "empty";
+        el.textContent = "No runs awaiting approval.";
+        return;
+      }
+      el.className = "";
+      el.innerHTML = pending.map((t) => `
+        <article class="run">
+          <h2><code>${t.run_id}</code></h2>
+          <div class="meta">${t.repo_url || ""} · ${t.latency_ms || 0} ms · exit ${t.test_exit_code ?? "—"} · ${t.pr_mode || "no-pr"}</div>
+          <div class="actions">
+            <button type="button" class="ok" data-id="${t.run_id}" data-yes="1">Approve</button>
+            <button type="button" class="bad" data-id="${t.run_id}" data-yes="0">Reject</button>
+            <a class="ghost" style="padding:0.5rem 0.9rem;text-decoration:none;border:1px solid var(--line);border-radius:6px;color:inherit"
+               href="${$("base").value.replace(/\/$/, "")}/v1/runs/${t.run_id}" target="_blank" rel="noreferrer">JSON</a>
+          </div>
+        </article>
+      `).join("");
+      el.querySelectorAll("button[data-id]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          btn.disabled = true;
+          try {
+            await approve(btn.dataset.id, btn.dataset.yes === "1");
+          } catch (e) {
+            showErr(String(e.message || e));
+            btn.disabled = false;
+          }
+        });
+      });
+    }
+
+    async function load() {
+      showErr("");
+      try {
+        const data = await api("/v1/traces?limit=50");
+        render(data.traces || []);
+      } catch (e) {
+        $("list").className = "empty";
+        $("list").textContent = "Could not load traces.";
+        showErr(String(e.message || e));
+      }
+    }
+
+    $("refresh").addEventListener("click", load);
+    if ($("token").value) load();
+  </script>
+</body>
+</html>

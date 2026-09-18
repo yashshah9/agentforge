@@ -39,6 +39,13 @@ def test_health(client: TestClient) -> None:
     assert client.get("/health").json()["status"] == "ok"
 
 
+def test_approvals_console_served(client: TestClient) -> None:
+    resp = client.get("/approvals")
+    assert resp.status_code == 200
+    assert "text/html" in resp.headers.get("content-type", "")
+    assert b"awaiting" in resp.content.lower() or b"Approve" in resp.content
+
+
 def test_create_run_requires_auth(client: TestClient) -> None:
     resp = client.post(
         "/v1/runs",

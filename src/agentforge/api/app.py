@@ -4,9 +4,12 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from platformkit.protocols import Principal
 from pydantic import BaseModel, Field
 
@@ -32,6 +35,18 @@ async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
 
 
 app = FastAPI(title="agentforge", version=__version__, lifespan=lifespan)
+
+_STATIC = Path(__file__).resolve().parent.parent / "static"
+if _STATIC.is_dir():
+    app.mount("/static", StaticFiles(directory=str(_STATIC)), name="static")
+
+
+@app.get("/approvals", include_in_schema=False)
+def approvals_console() -> FileResponse:
+    page = _STATIC / "approval.html"
+    if not page.is_file():
+        raise HTTPException(status_code=404, detail="Approval console not packaged")
+    return FileResponse(page)
 
 
 class CreateRunRequest(BaseModel):
