@@ -153,8 +153,12 @@ def run_eval_suite(
     import os
 
     if fixtures_env:
-        fixtures = Path(__file__).resolve().parents[3] / "fixtures"
-        os.environ["AGENTFORGE_FIXTURES_ROOT"] = str(fixtures)
+        repo_fixtures = Path(__file__).resolve().parents[3] / "fixtures"
+        docker_fixtures = Path("/app/fixtures")
+        if repo_fixtures.is_dir():
+            os.environ["AGENTFORGE_FIXTURES_ROOT"] = str(repo_fixtures)
+        elif docker_fixtures.is_dir():
+            os.environ["AGENTFORGE_FIXTURES_ROOT"] = str(docker_fixtures)
 
     settings = Settings(
         auth_driver="api_key",

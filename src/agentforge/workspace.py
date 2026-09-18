@@ -15,7 +15,14 @@ def fixtures_root() -> Path:
     env = os.environ.get("AGENTFORGE_FIXTURES_ROOT")
     if env:
         return Path(env)
-    return Path(__file__).resolve().parents[2] / "fixtures"
+    docker = Path("/app/fixtures")
+    if docker.is_dir():
+        return docker
+    # Editable / repo checkout: .../agentforge/src/agentforge/workspace.py → repo fixtures
+    repo = Path(__file__).resolve().parents[2] / "fixtures"
+    if repo.is_dir():
+        return repo
+    return docker
 
 
 def resolve_workspace(repo_url: str, work_root: Path, run_id: str) -> Path:
