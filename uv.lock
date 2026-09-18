@@ -24,7 +24,7 @@ wheels = [
 
 [[package]]
 name = "agentforge"
-version = "0.3.0"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "fastapi" },
@@ -516,7 +516,7 @@ wheels = [
 
 [[package]]
 name = "platformkit"
-version = "0.1.0"
+version = "0.1.1"
 source = { editable = "../platformkit" }
 dependencies = [
     { name = "pydantic" },

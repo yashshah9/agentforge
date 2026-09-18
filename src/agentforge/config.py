@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     github_api_base: str = "https://api.github.com"
     # Eval gate
     eval_min_pass_rate: float = 1.0
+    # Start daemon worker with the API (serve / TestClient lifespan)
+    inline_worker: bool = True
 
     def api_key_map(self) -> dict[str, str]:
         out: dict[str, str] = {}

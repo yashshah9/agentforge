@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentforge"
-version = "0.3.0"
+version = "0.4.0"
 description = "Multi-agent software engineering harness with sandboxed execution and human approval"
 readme = "README.md"
 license = "MIT"

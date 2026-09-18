@@ -27,6 +27,8 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
     app_module.settings.admin_keys = "admin-key"
     app_module.settings.work_root = str(tmp_path / "work")
     app_module.settings.agentbox_url = "http://agentbox.test"
+    # Deterministic tests drive the queue via process_once / drain.
+    app_module.settings.inline_worker = False
     app_module.kit = build_kit(app_module.settings)
     app_module.store = RunStore()
     with TestClient(app_module.app) as test_client:
@@ -218,4 +220,53 @@ class _mock_agentbox_fail(_mock_agentbox_success):
         }
 
 
-# end of mocks
+def test_health_reports_queue_depth(client: TestClient) -> None:
+    body = client.get("/health").json()
+    assert body["inline_worker"] is False
+    assert "queue_depth" in body
+
+
+def test_inline_worker_drains_burst(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Default serve mode: lifespan worker drains a burst without process_once."""
+    import time
+
+    fixtures = Path(__file__).resolve().parents[1] / "fixtures"
+    monkeypatch.setenv("AGENTFORGE_FIXTURES_ROOT", str(fixtures))
+    monkeypatch.setattr("agentforge.pipeline.AgentboxClient", _mock_agentbox_success)
+    app_module.settings.auth_driver = "api_key"
+    app_module.settings.audit_driver = "memory"
+    app_module.settings.queue_driver = "memory"
+    app_module.settings.api_keys = "dev-key:demo-tenant"
+    app_module.settings.admin_keys = "admin-key"
+    app_module.settings.work_root = str(tmp_path / "work")
+    app_module.settings.agentbox_url = "http://agentbox.test"
+    app_module.settings.inline_worker = True
+    app_module.kit = build_kit(app_module.settings)
+    app_module.store = RunStore()
+
+    with TestClient(app_module.app) as client:
+        ids = []
+        for i in range(5):
+            ids.append(
+                client.post(
+                    "/v1/runs",
+                    headers={"Authorization": "Bearer dev-key"},
+                    json={"issue": f"fix {i}", "repo_url": "fixture://broken_counter"},
+                ).json()["id"]
+            )
+        deadline = time.time() + 5.0
+        while time.time() < deadline:
+            statuses = [
+                client.get(f"/v1/runs/{rid}", headers={"Authorization": "Bearer dev-key"}).json()[
+                    "status"
+                ]
+                for rid in ids
+            ]
+            if all(s != "queued" for s in statuses):
+                break
+            time.sleep(0.05)
+        else:
+            raise AssertionError(f"worker did not drain: {statuses}")
+        assert all(s in {"awaiting_approval", "failed", "done"} for s in statuses)

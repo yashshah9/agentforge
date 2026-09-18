@@ -34,6 +34,12 @@ For `fixture://` runs, set `AGENTFORGE_GITHUB_MIRROR_REPO=owner/repo` so patches
 
 Token sources: classic/fine-grained PAT, or a GitHub App **installation token** minted outside the process and passed as `AGENTFORGE_GITHUB_TOKEN`.
 
+## Worker
+
+`agentforge serve` starts an **inline daemon worker** via FastAPI lifespan (`AGENTFORGE_INLINE_WORKER=true` by default). Burst `POST /v1/runs` is drained automatically in one process.
+
+Set `AGENTFORGE_INLINE_WORKER=false` for deterministic tests that call `process_once` / `drain` explicitly. Docker compose uses the same serve entrypoint (Redis queue + inline worker).
+
 ## Observability
 
 Every pipeline run records:

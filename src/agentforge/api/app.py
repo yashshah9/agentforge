@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from typing import Annotated, Any
 
 from fastapi import Depends, FastAPI, Header, HTTPException
@@ -12,12 +14,24 @@ from agentforge.__version__ import __version__
 from agentforge.config import Settings
 from agentforge.domain.runs import Run, RunStatus, RunStore
 from agentforge.platform import build_kit
+from agentforge.worker.loop import start_inline_worker, stop_inline_worker
 
 settings = Settings()
 kit = build_kit(settings)
 store = RunStore()
 
-app = FastAPI(title="agentforge", version=__version__)
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
+    if settings.inline_worker:
+        start_inline_worker(kit=kit, store=store, settings=settings)
+    try:
+        yield
+    finally:
+        stop_inline_worker()
+
+
+app = FastAPI(title="agentforge", version=__version__, lifespan=lifespan)
 
 
 class CreateRunRequest(BaseModel):
@@ -97,12 +111,19 @@ def require_principal(token: Annotated[str, Depends(_bearer_token)]) -> Principa
 
 @app.get("/health")
 def health() -> dict[str, Any]:
+    depth = 0
+    try:
+        depth = kit.queue.depth(settings.queue_topic)
+    except Exception:  # noqa: BLE001 — health should stay up
+        depth = -1
     return {
         "status": "ok",
         "version": __version__,
         "auth": settings.auth_driver,
         "audit": settings.audit_driver,
         "queue": settings.queue_driver,
+        "queue_depth": depth,
+        "inline_worker": settings.inline_worker,
         "agentbox_url": settings.agentbox_url,
         "runs": len(store.list_recent(limit=500)),
     }

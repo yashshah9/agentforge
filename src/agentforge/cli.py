@@ -5,7 +5,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import threading
 
 import uvicorn
 
@@ -18,11 +17,11 @@ def main() -> None:
     parser = argparse.ArgumentParser(prog="agentforge")
     sub = parser.add_subparsers(dest="cmd", required=True)
 
-    serve = sub.add_parser("serve", help="Run API + in-process worker")
+    serve = sub.add_parser("serve", help="Run API (+ inline worker via app lifespan)")
     serve.add_argument("--host", default=None)
     serve.add_argument("--port", type=int, default=None)
 
-    sub.add_parser("worker", help="Run worker only (same process store required for memory queue)")
+    sub.add_parser("worker", help="Run worker only (shares process store when co-imported)")
 
     ev = sub.add_parser("eval", help="Run golden eval suite (CI gate)")
     ev.add_argument(
@@ -36,17 +35,13 @@ def main() -> None:
     settings = Settings()
 
     if args.cmd == "serve":
-        host = args.host or settings.host
-        port = args.port or settings.port
-        import agentforge.api.app  # noqa: F401
-
-        thread = threading.Thread(
-            target=run_worker_loop,
-            kwargs={"poll_seconds": 0.25},
-            daemon=True,
+        # Lifespan starts the inline worker when AGENTFORGE_INLINE_WORKER=true (default).
+        uvicorn.run(
+            "agentforge.api.app:app",
+            host=args.host or settings.host,
+            port=args.port or settings.port,
+            reload=False,
         )
-        thread.start()
-        uvicorn.run("agentforge.api.app:app", host=host, port=port, reload=False)
     elif args.cmd == "worker":
         run_worker_loop()
     elif args.cmd == "eval":
