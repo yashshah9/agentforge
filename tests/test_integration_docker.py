@@ -69,8 +69,11 @@ def test_docker_end_to_end_sandbox_fix_and_approve() -> None:
     done = _wait_status(run_id, {"awaiting_approval", "failed"})
     assert done["status"] == "awaiting_approval", done
     assert done["test_exit_code"] == 0
-    assert done.get("sandbox_backend") == "subprocess"
-    assert "network_isolated" in done  # may be False without unshare/bwrap in container
+    expected_backend = os.environ.get("EXPECT_SANDBOX_BACKEND", "subprocess")
+    assert done.get("sandbox_backend") == expected_backend, done
+    assert "network_isolated" in done
+    if expected_backend == "docker":
+        assert done.get("network_isolated") is True, done
     assert "n + 1" in str(done.get("patch_summary"))
 
     approved = httpx.post(

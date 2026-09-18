@@ -19,6 +19,20 @@ docker compose up --build -d agentbox redis postgres agentforge
 docker compose run --rm integration
 ```
 
+### Docker sandbox backend (recommended isolation)
+
+Default compose uses agentbox **subprocess**. For ephemeral `docker run --rm` isolation:
+
+```bash
+export AGENTBOX_HOST_TMP="$(cd .. && pwd)/.agentbox-work"
+mkdir -p "$AGENTBOX_HOST_TMP"
+docker compose -f compose.yaml -f compose.docker-sandbox.yaml up --build -d
+EXPECT_SANDBOX_BACKEND=docker \
+  docker compose -f compose.yaml -f compose.docker-sandbox.yaml run --rm integration
+```
+
+`AGENTBOX_HOST_TMP` must be an absolute path bind-mounted at the same path inside the agentbox container so nested `docker run -v` works (Docker Desktop).
+
 ## GitHub draft PRs
 
 Without credentials, PRs are `local://draft-pr/<run_id>` (fine for local/CI).

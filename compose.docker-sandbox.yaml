@@ -1,0 +1,25 @@
+# Stronger isolation: agentbox runs code in ephemeral containers.
+#
+#   export AGENTBOX_HOST_TMP="$(cd .. && pwd)/.agentbox-work"
+#   mkdir -p "$AGENTBOX_HOST_TMP"
+#   docker compose -f compose.yaml -f compose.docker-sandbox.yaml up --build -d
+#   EXPECT_SANDBOX_BACKEND=docker docker compose -f compose.yaml -f compose.docker-sandbox.yaml run --rm integration
+services:
+  agentbox:
+    build:
+      context: ../agentbox
+      dockerfile: docker/Dockerfile
+      target: runtime-docker
+    environment:
+      AGENTBOX_SANDBOX_BACKEND: docker
+      AGENTBOX_LOG_LEVEL: INFO
+      AGENTBOX_DEFAULT_TIMEOUT_SECONDS: 30
+      TMPDIR: ${AGENTBOX_HOST_TMP:?Set AGENTBOX_HOST_TMP to an absolute host path}
+      AGENTBOX_SNAPSHOT_DIR: ${AGENTBOX_HOST_TMP}/snapshots
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${AGENTBOX_HOST_TMP}:${AGENTBOX_HOST_TMP}
+
+  integration:
+    environment:
+      EXPECT_SANDBOX_BACKEND: docker
