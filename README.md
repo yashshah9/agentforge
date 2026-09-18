@@ -8,7 +8,7 @@ Multi-agent **software engineering harness**: plan → patch → **agentbox** te
 uv venv --python 3.12
 uv pip install -e ../platformkit -e ".[dev]"
 uv run pytest tests/test_api.py tests/test_github.py tests/test_evals.py -q
-uv run agentforge eval --min-pass-rate 1.0
+uv run agentforge eval --min-pass-rate 1.0 --baseline evals/baseline.json
 uv run agentforge serve   # :8090
 ```
 

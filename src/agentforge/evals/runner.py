@@ -55,8 +55,92 @@ class _FakeSandbox:
 
 
 def load_cases(path: Path | None = None) -> list[EvalCase]:
-    data = json.loads((path or CASES_PATH).read_text(encoding="utf-8"))
+    data = json.loads(resolve_cases_path(path).read_text(encoding="utf-8"))
     return [EvalCase(**row) for row in data]
+
+
+def resolve_cases_path(path: Path | None = None) -> Path:
+    if path is not None:
+        return path
+    if CASES_PATH.is_file():
+        return CASES_PATH
+    docker = Path("/app/evals/cases.json")
+    if docker.is_file():
+        return docker
+    raise FileNotFoundError("evals/cases.json not found")
+
+
+def resolve_baseline_path(path: Path | None = None) -> Path:
+    if path is not None:
+        return path
+    bundled = Path(__file__).resolve().parent / "data" / "baseline.json"
+    if bundled.is_file():
+        return bundled
+    repo = Path(__file__).resolve().parents[3] / "evals" / "baseline.json"
+    if repo.is_file():
+        return repo
+    docker = Path("/app/evals/baseline.json")
+    if docker.is_file():
+        return docker
+    raise FileNotFoundError("evals/baseline.json not found")
+
+
+def snapshot_from_results(results: list[EvalResult], *, pass_rate: float) -> dict[str, object]:
+    return {
+        "pass_rate": round(pass_rate, 4),
+        "cases": {
+            r.case_id: {
+                "passed": r.passed,
+                "status": r.actual_status,
+                "detail": r.detail,
+            }
+            for r in results
+        },
+    }
+
+
+def write_baseline(path: Path, results: list[EvalResult], *, pass_rate: float) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        json.dumps(snapshot_from_results(results, pass_rate=pass_rate), indent=2) + "\n",
+        encoding="utf-8",
+    )
+
+
+def load_baseline(path: Path | None = None) -> dict[str, object]:
+    raw: object = json.loads(resolve_baseline_path(path).read_text(encoding="utf-8"))
+    if not isinstance(raw, dict):
+        raise TypeError("baseline root must be an object")
+    return raw
+
+
+def compare_to_baseline(results: list[EvalResult], baseline: dict[str, object]) -> list[str]:
+    """Return regression messages (empty = ok)."""
+    regressions: list[str] = []
+    prior_cases = baseline.get("cases", {})
+    if not isinstance(prior_cases, dict):
+        return ["baseline.cases missing or invalid"]
+    current = {r.case_id: r for r in results}
+    for case_id, prior in prior_cases.items():
+        if not isinstance(prior, dict):
+            continue
+        now = current.get(str(case_id))
+        if now is None:
+            regressions.append(f"{case_id}: missing from current suite")
+            continue
+        if prior.get("passed") is True and not now.passed:
+            regressions.append(f"{case_id}: was pass, now fail ({now.detail})")
+            continue
+        prior_status = prior.get("status")
+        if (
+            prior.get("passed") is True
+            and prior_status
+            and now.actual_status != prior_status
+        ):
+            regressions.append(
+                f"{case_id}: status changed {prior_status!r} → {now.actual_status!r}"
+            )
+    return regressions
 
 
 def run_eval_suite(

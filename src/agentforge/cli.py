@@ -5,11 +5,18 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from pathlib import Path
 
 import uvicorn
 
 from agentforge.config import Settings
-from agentforge.evals.runner import results_as_dict, run_eval_suite
+from agentforge.evals.runner import (
+    compare_to_baseline,
+    load_baseline,
+    results_as_dict,
+    run_eval_suite,
+    write_baseline,
+)
 from agentforge.worker.loop import run_worker_loop
 
 
@@ -30,6 +37,18 @@ def main() -> None:
         default=None,
         help="Fail if pass rate is below this (default: settings / 1.0)",
     )
+    ev.add_argument(
+        "--baseline",
+        type=Path,
+        default=None,
+        help="Compare against a baseline snapshot (fails on regressions)",
+    )
+    ev.add_argument(
+        "--write-baseline",
+        type=Path,
+        default=None,
+        help="Write current results as a baseline JSON file",
+    )
 
     args = parser.parse_args()
     settings = Settings()
@@ -48,13 +67,46 @@ def main() -> None:
         results, rate = run_eval_suite()
         payload = results_as_dict(results, rate)
         print(json.dumps(payload, indent=2))
+
+        if args.write_baseline is not None:
+            write_baseline(args.write_baseline, results, pass_rate=rate)
+            print(f"Wrote baseline → {args.write_baseline}", file=sys.stderr)
+
         minimum = (
             args.min_pass_rate
             if args.min_pass_rate is not None
             else settings.eval_min_pass_rate
         )
+        failed = False
         if rate < minimum:
-            print(f"EVAL GATE FAILED: pass_rate={rate:.2f} < min={minimum:.2f}", file=sys.stderr)
+            print(
+                f"EVAL GATE FAILED: pass_rate={rate:.2f} < min={minimum:.2f}",
+                file=sys.stderr,
+            )
+            failed = True
+
+        baseline: dict[str, object] | None = None
+        baseline_path = args.baseline
+        if baseline_path is not None:
+            baseline = load_baseline(baseline_path)
+        elif args.write_baseline is None:
+            try:
+                baseline = load_baseline()
+                baseline_path = Path("(bundled)")
+            except FileNotFoundError:
+                baseline = None
+
+        if baseline is not None:
+            regressions = compare_to_baseline(results, baseline)
+            if regressions:
+                print("BASELINE REGRESSIONS:", file=sys.stderr)
+                for msg in regressions:
+                    print(f"  - {msg}", file=sys.stderr)
+                failed = True
+            else:
+                print(f"BASELINE OK ({baseline_path})", file=sys.stderr)
+
+        if failed:
             raise SystemExit(1)
         print(f"EVAL GATE PASSED: pass_rate={rate:.2f}", file=sys.stderr)
 

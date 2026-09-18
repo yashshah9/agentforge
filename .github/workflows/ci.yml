@@ -25,4 +25,4 @@ jobs:
       - name: Unit tests
         run: pytest tests/test_api.py tests/test_github.py tests/test_evals.py -q
       - name: Eval gate
-        run: agentforge eval --min-pass-rate 1.0
+        run: agentforge eval --min-pass-rate 1.0 --baseline evals/baseline.json

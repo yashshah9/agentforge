@@ -64,7 +64,7 @@ Show `run.create`, `run.awaiting_approval`, `run.approve`.
 ## 4. Eval gate (1 min)
 
 ```bash
-agentforge eval --min-pass-rate 1.0
+agentforge eval --min-pass-rate 1.0 --baseline evals/baseline.json
 ```
 
 Show pass_rate=1.0 and mention CI runs this on every PR.

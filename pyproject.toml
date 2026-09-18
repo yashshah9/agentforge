@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentforge"
-version = "0.4.0"
+version = "0.5.0"
 description = "Multi-agent software engineering harness with sandboxed execution and human approval"
 readme = "README.md"
 license = "MIT"
@@ -40,6 +40,9 @@ agentforge = "agentforge.cli:main"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/agentforge"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"src/agentforge/evals/data/baseline.json" = "agentforge/evals/data/baseline.json"
 
 [tool.uv.sources]
 platformkit = { path = "../platformkit", editable = true }

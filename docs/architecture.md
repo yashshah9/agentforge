@@ -53,7 +53,9 @@ Every pipeline run records:
 `evals/cases.json` drives offline golden scenarios (happy path, policy deny, sandbox fail, unknown fixture).
 
 ```bash
-agentforge eval --min-pass-rate 1.0
+agentforge eval --min-pass-rate 1.0 --baseline evals/baseline.json
+# refresh snapshot after intentional pipeline changes:
+agentforge eval --write-baseline evals/baseline.json
 ```
 
-CI runs the same gate. A regression that breaks policy or the happy path fails the build.
+CI fails when the pass rate drops or a previously-passing case regresses.
