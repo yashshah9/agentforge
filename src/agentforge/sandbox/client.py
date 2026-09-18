@@ -32,9 +32,15 @@ class AgentboxClient:
             limits["memory_mb"] = memory_mb
         if limits:
             payload["limits"] = limits
-        resp = self._client.post("/v1/run", json=payload)
-        if resp.status_code >= 400:
-            raise RuntimeError(f"agentbox HTTP {resp.status_code}: {resp.text}")
+        try:
+            resp = self._client.post("/v1/run", json=payload)
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            raise RuntimeError(
+                f"agentbox HTTP {exc.response.status_code}: {exc.response.text}"
+            ) from exc
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"agentbox request failed: {exc}") from exc
         return cast(dict[str, Any], resp.json())
 
     def close(self) -> None:

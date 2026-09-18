@@ -127,6 +127,12 @@ def test_happy_path_approve(client: TestClient, monkeypatch: pytest.MonkeyPatch)
         json={"approve": True},
     )
     assert approved.json()["status"] == "done"
+    again = client.post(
+        f"/v1/runs/{run_id}/approval",
+        headers={"Authorization": "Bearer dev-key"},
+        json={"approve": False, "reason": "too late"},
+    )
+    assert again.status_code == 409
 
 
 def test_reject_approval(client: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -218,6 +224,24 @@ class _mock_agentbox_fail(_mock_agentbox_success):
             "network_isolated": True,
             "oom_killed": False,
         }
+
+
+def test_orphan_run_is_requeued(tmp_path: Path) -> None:
+    from agentforge.worker.loop import process_once
+
+    settings = app_module.settings
+    settings.queue_driver = "memory"
+    settings.audit_driver = "memory"
+    settings.auth_driver = "api_key"
+    settings.work_root = str(tmp_path / "work")
+    kit = build_kit(settings)
+    store = RunStore()
+    kit.queue.enqueue(settings.queue_topic, {"run_id": "missing-run"})
+    assert process_once(kit, store, settings) is True
+    msg = kit.queue.dequeue(settings.queue_topic, timeout_seconds=0)
+    assert msg is not None
+    assert msg["run_id"] == "missing-run"
+    assert msg["_orphan_retries"] == 1
 
 
 def test_health_reports_queue_depth(client: TestClient) -> None:

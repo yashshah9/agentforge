@@ -107,7 +107,7 @@ class GitHubDraftPRPublisher:
             )
         owner, repo = owner_repo
         branch = f"agentforge/{run_id[:8]}"
-        base_sha = self._ref_sha(owner, repo, self._base_branch)
+        base_sha, base_branch = self._ref_sha(owner, repo, self._base_branch)
         commit_sha = self._commit_workspace(
             owner=owner,
             repo=repo,
@@ -120,6 +120,7 @@ class GitHubDraftPRPublisher:
             owner=owner,
             repo=repo,
             branch=branch,
+            base_branch=base_branch,
             title=f"[agentforge] {issue[:72]}",
             body=_pr_body(run_id=run_id, issue=issue, patch_summary=patch_summary),
         )
@@ -140,15 +141,16 @@ class GitHubDraftPRPublisher:
             return owner, repo
         return None
 
-    def _ref_sha(self, owner: str, repo: str, branch: str) -> str:
+    def _ref_sha(self, owner: str, repo: str, branch: str) -> tuple[str, str]:
         resp = self._client.get(f"/repos/{owner}/{repo}/git/ref/heads/{branch}")
+        used_branch = branch
         if resp.status_code == 404:
             repo_resp = self._client.get(f"/repos/{owner}/{repo}")
             self._raise(repo_resp)
-            default_branch = str(repo_resp.json()["default_branch"])
-            resp = self._client.get(f"/repos/{owner}/{repo}/git/ref/heads/{default_branch}")
+            used_branch = str(repo_resp.json()["default_branch"])
+            resp = self._client.get(f"/repos/{owner}/{repo}/git/ref/heads/{used_branch}")
         self._raise(resp)
-        return str(resp.json()["object"]["sha"])
+        return str(resp.json()["object"]["sha"]), used_branch
 
     def _commit_workspace(
         self,
@@ -227,13 +229,14 @@ class GitHubDraftPRPublisher:
         branch: str,
         title: str,
         body: str,
+        base_branch: str | None = None,
     ) -> dict[str, Any]:
         resp = self._client.post(
             f"/repos/{owner}/{repo}/pulls",
             json={
                 "title": title,
                 "head": branch,
-                "base": self._base_branch,
+                "base": base_branch or self._base_branch,
                 "body": body,
                 "draft": True,
             },

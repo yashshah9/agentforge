@@ -89,6 +89,25 @@ class RunStore:
             run.updated_at = datetime.now(UTC)
             return run
 
+    def transition(
+        self,
+        run_id: str,
+        *,
+        from_status: RunStatus,
+        **fields: object,
+    ) -> Run | None:
+        """Atomically update only if current status matches `from_status`."""
+        with self._lock:
+            run = self._runs.get(run_id)
+            if run is None or run.status != from_status:
+                return None
+            for key, value in fields.items():
+                if not hasattr(run, key):
+                    raise AttributeError(key)
+                setattr(run, key, value)
+            run.updated_at = datetime.now(UTC)
+            return run
+
     def append_step(self, run_id: str, step: RunStep) -> Run | None:
         with self._lock:
             run = self._runs.get(run_id)

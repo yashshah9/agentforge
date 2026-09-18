@@ -19,6 +19,7 @@ log = structlog.get_logger()
 _stop = threading.Event()
 _thread: threading.Thread | None = None
 _lock = threading.Lock()
+_ORPHAN_RETRY_CAP = 5
 
 
 def process_once(kit: object, store: RunStore, settings: Settings) -> bool:
@@ -33,7 +34,18 @@ def process_once(kit: object, store: RunStore, settings: Settings) -> bool:
     run_id = str(msg.get("run_id", ""))
     run = store.get(run_id)
     if run is None:
-        log.warning("run_missing", run_id=run_id)
+        retries = int(msg.get("_orphan_retries", 0) or 0)
+        if retries >= _ORPHAN_RETRY_CAP:
+            log.error("run_missing_abandoned", run_id=run_id, retries=retries)
+            return True
+        # Separate CLI worker process has an empty RunStore; put the job back
+        # so a process that owns the run (API + inline worker) can claim it.
+        log.warning("run_missing_requeue", run_id=run_id, retries=retries)
+        kit.queue.enqueue(
+            settings.queue_topic,
+            {"run_id": run_id, "_orphan_retries": retries + 1},
+        )
+        time.sleep(min(0.5 * (2**retries), 5.0))
         return True
 
     log.info("run_start", run_id=run_id, repo=run.repo_url)
@@ -68,7 +80,12 @@ def _loop(kit: PlatformKit, store: RunStore, settings: Settings, poll_seconds: f
         agentbox=settings.agentbox_url,
     )
     while not _stop.is_set():
-        worked = process_once(kit, store, settings)
+        try:
+            worked = process_once(kit, store, settings)
+        except Exception:
+            log.exception("worker_iteration_failed")
+            _stop.wait(poll_seconds)
+            continue
         if not worked:
             _stop.wait(poll_seconds)
     log.info("worker_stop")

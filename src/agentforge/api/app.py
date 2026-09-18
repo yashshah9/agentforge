@@ -210,23 +210,37 @@ def approve_run(
     body: ApprovalRequest,
     principal: Annotated[Principal, Depends(require_principal)],
 ) -> RunResponse:
+    if not kit.auth.authorize(principal, "runs:approve"):
+        raise HTTPException(status_code=403, detail="Forbidden")
     run = store.get(run_id)
     if run is None:
         raise HTTPException(status_code=404, detail="Run not found")
     tenant_id = principal.tenant_id or principal.id
     if run.tenant_id != tenant_id and "admin" not in principal.roles:
         raise HTTPException(status_code=404, detail="Run not found")
-    if run.status != RunStatus.AWAITING_APPROVAL:
-        raise HTTPException(status_code=409, detail=f"Run status is {run.status}")
 
     if body.approve:
-        updated = store.update(run_id, status=RunStatus.DONE)
+        updated = store.transition(
+            run_id,
+            from_status=RunStatus.AWAITING_APPROVAL,
+            status=RunStatus.DONE,
+        )
         action = "run.approve"
     else:
-        updated = store.update(run_id, status=RunStatus.FAILED, error=body.reason or "rejected")
+        updated = store.transition(
+            run_id,
+            from_status=RunStatus.AWAITING_APPROVAL,
+            status=RunStatus.FAILED,
+            error=body.reason or "rejected",
+        )
         action = "run.reject"
 
-    assert updated is not None
+    if updated is None:
+        current = store.get(run_id)
+        if current is None:
+            raise HTTPException(status_code=404, detail="Run not found")
+        raise HTTPException(status_code=409, detail=f"Run status is {current.status}")
+
     kit.audit.emit(
         actor=principal.id,
         action=action,
