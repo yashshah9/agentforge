@@ -25,6 +25,7 @@ class RunStep:
     name: str
     status: str
     detail: dict[str, Any] = field(default_factory=dict)
+    latency_ms: int = 0
 
 
 @dataclass
@@ -46,8 +47,12 @@ class Run:
     pr_mode: str | None = None  # github | local
     error: str | None = None
     workspace_path: str | None = None
+    latency_ms: int = 0
+    estimated_cost_usd: float = 0.0
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     updated_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
 
 
 class RunStore:
@@ -96,6 +101,11 @@ class RunStore:
     def list_for_tenant(self, tenant_id: str) -> list[Run]:
         with self._lock:
             return [r for r in self._runs.values() if r.tenant_id == tenant_id]
+
+    def list_recent(self, *, limit: int = 20) -> list[Run]:
+        with self._lock:
+            runs = sorted(self._runs.values(), key=lambda r: r.updated_at, reverse=True)
+            return runs[: max(1, limit)]
 
     def clear(self) -> None:
         with self._lock:

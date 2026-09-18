@@ -34,6 +34,14 @@ For `fixture://` runs, set `AGENTFORGE_GITHUB_MIRROR_REPO=owner/repo` so patches
 
 Token sources: classic/fine-grained PAT, or a GitHub App **installation token** minted outside the process and passed as `AGENTFORGE_GITHUB_TOKEN`.
 
+## Observability
+
+Every pipeline run records:
+
+- per-step `latency_ms`
+- total `latency_ms` + `estimated_cost_usd` (flat sandbox metering today)
+- `GET /v1/traces` for tenant rollups
+
 ## Eval gate
 
 `evals/cases.json` drives offline golden scenarios (happy path, policy deny, sandbox fail, unknown fixture).

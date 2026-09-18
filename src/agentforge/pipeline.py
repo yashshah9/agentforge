@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import time
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -21,6 +23,10 @@ if TYPE_CHECKING:
     from agentforge.config import Settings
 
 log = structlog.get_logger()
+
+# ponytail: flat extractive cost model; replace with real LLM/sandbox metering
+_COST_BASE_USD = 0.0005
+_COST_SANDBOX_USD = 0.001
 
 
 class SandboxClient(Protocol):
@@ -60,6 +66,22 @@ def _maybe_deny_injection(issue: str) -> None:
         raise PolicyDenied("issue text failed security policy")
 
 
+def _step(
+    store: RunStore,
+    run_id: str,
+    name: str,
+    status: str,
+    detail: dict[str, Any],
+    *,
+    started: float,
+) -> None:
+    latency_ms = int((time.perf_counter() - started) * 1000)
+    store.append_step(
+        run_id,
+        RunStep(name=name, status=status, detail=detail, latency_ms=latency_ms),
+    )
+
+
 def execute_pipeline(
     *,
     kit: PlatformKit,
@@ -72,9 +94,13 @@ def execute_pipeline(
     work_root = Path(settings.work_root)
     work_root.mkdir(parents=True, exist_ok=True)
     pub = publisher or build_publisher(settings)
+    pipeline_started = time.perf_counter()
+    store.update(run.id, started_at=datetime.now(UTC))
+    cost = _COST_BASE_USD
 
     try:
         _maybe_deny_injection(run.issue)
+        t0 = time.perf_counter()
         store.update(run.id, status=RunStatus.PLANNING)
         plan = [
             "Prepare isolated workspace",
@@ -85,17 +111,20 @@ def execute_pipeline(
             "Await human approval",
         ]
         store.update(run.id, plan=plan)
-        store.append_step(run.id, RunStep(name="plan", status="ok", detail={"steps": plan}))
+        _step(store, run.id, "plan", "ok", {"steps": plan}, started=t0)
 
+        t0 = time.perf_counter()
         workspace = resolve_workspace(run.repo_url, work_root, run.id)
         store.update(run.id, workspace_path=str(workspace), status=RunStatus.CODING)
         files = list_files(workspace)
-        store.append_step(run.id, RunStep(name="list_files", status="ok", detail={"files": files}))
+        _step(store, run.id, "list_files", "ok", {"files": files}, started=t0)
 
+        t0 = time.perf_counter()
         summary = apply_fix(workspace, run.repo_url, run.issue)
         store.update(run.id, patch_summary=summary)
-        store.append_step(run.id, RunStep(name="patch", status="ok", detail={"summary": summary}))
+        _step(store, run.id, "patch", "ok", {"summary": summary}, started=t0)
 
+        t0 = time.perf_counter()
         store.update(run.id, status=RunStatus.TESTING)
         owns_client = False
         client: SandboxClient
@@ -114,6 +143,7 @@ def execute_pipeline(
         finally:
             if owns_client:
                 client.close()
+        cost += _COST_SANDBOX_USD
 
         exit_code = int(result.get("exit_code", 1))
         store.update(
@@ -124,21 +154,28 @@ def execute_pipeline(
             sandbox_backend=str(result.get("backend", "")),
             network_isolated=bool(result.get("network_isolated", False)),
         )
-        store.append_step(
+        _step(
+            store,
             run.id,
-            RunStep(
-                name="sandbox_tests",
-                status="ok" if exit_code == 0 else "failed",
-                detail={
-                    "exit_code": exit_code,
-                    "network_isolated": result.get("network_isolated"),
-                    "oom_killed": result.get("oom_killed"),
-                },
-            ),
+            "sandbox_tests",
+            "ok" if exit_code == 0 else "failed",
+            {
+                "exit_code": exit_code,
+                "network_isolated": result.get("network_isolated"),
+                "oom_killed": result.get("oom_killed"),
+            },
+            started=t0,
         )
 
         if exit_code != 0:
-            store.update(run.id, status=RunStatus.FAILED, error="sandbox tests failed")
+            store.update(
+                run.id,
+                status=RunStatus.FAILED,
+                error="sandbox tests failed",
+                latency_ms=int((time.perf_counter() - pipeline_started) * 1000),
+                estimated_cost_usd=round(cost, 6),
+                finished_at=datetime.now(UTC),
+            )
             kit.audit.emit(
                 actor="system:worker",
                 action="run.tests_failed",
@@ -149,6 +186,7 @@ def execute_pipeline(
             )
             return
 
+        t0 = time.perf_counter()
         draft = pub.publish(
             run_id=run.id,
             issue=run.issue,
@@ -156,26 +194,30 @@ def execute_pipeline(
             workspace=workspace,
             repo_url=run.repo_url,
         )
-        store.append_step(
+        _step(
+            store,
             run.id,
-            RunStep(
-                name="draft_pr",
-                status="ok",
-                detail={
-                    "url": draft.url,
-                    "mode": draft.mode,
-                    "number": draft.number,
-                    "branch": draft.branch,
-                    "repo": draft.repo,
-                },
-            ),
+            "draft_pr",
+            "ok",
+            {
+                "url": draft.url,
+                "mode": draft.mode,
+                "number": draft.number,
+                "branch": draft.branch,
+                "repo": draft.repo,
+            },
+            started=t0,
         )
         store.update(
             run.id,
             status=RunStatus.AWAITING_APPROVAL,
             pr_url=draft.url,
             pr_mode=draft.mode,
+            latency_ms=int((time.perf_counter() - pipeline_started) * 1000),
+            estimated_cost_usd=round(cost, 6),
+            finished_at=datetime.now(UTC),
         )
+        final = store.get(run.id)
         kit.audit.emit(
             actor="system:worker",
             action="run.awaiting_approval",
@@ -183,13 +225,22 @@ def execute_pipeline(
                 "pr_url": draft.url,
                 "pr_mode": draft.mode,
                 "patch_summary": summary,
+                "latency_ms": final.latency_ms if final else 0,
+                "estimated_cost_usd": final.estimated_cost_usd if final else cost,
             },
             resource_type="run",
             resource_id=run.id,
             tenant_id=run.tenant_id,
         )
     except PolicyDenied as exc:
-        store.update(run.id, status=RunStatus.FAILED, error=f"policy_denied: {exc}")
+        store.update(
+            run.id,
+            status=RunStatus.FAILED,
+            error=f"policy_denied: {exc}",
+            latency_ms=int((time.perf_counter() - pipeline_started) * 1000),
+            estimated_cost_usd=round(cost, 6),
+            finished_at=datetime.now(UTC),
+        )
         kit.audit.emit(
             actor="system:worker",
             action="run.policy_denied",
@@ -200,7 +251,14 @@ def execute_pipeline(
         )
         log.warning("policy_denied", run_id=run.id, error=str(exc))
     except (WorkspaceError, FileNotFoundError, RuntimeError, OSError) as exc:
-        store.update(run.id, status=RunStatus.FAILED, error=str(exc))
+        store.update(
+            run.id,
+            status=RunStatus.FAILED,
+            error=str(exc),
+            latency_ms=int((time.perf_counter() - pipeline_started) * 1000),
+            estimated_cost_usd=round(cost, 6),
+            finished_at=datetime.now(UTC),
+        )
         kit.audit.emit(
             actor="system:worker",
             action="run.failed",

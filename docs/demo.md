@@ -40,6 +40,11 @@ Show the run JSON when `awaiting_approval`:
 - `patch_summary` mentions `n + 1`
 - `pr_url` is `local://…` (or a real GitHub draft PR URL if token configured)
 - `pr_mode`
+- `latency_ms` / per-step timings / `estimated_cost_usd`
+
+```bash
+curl -s localhost:8090/v1/traces -H "Authorization: Bearer dev-key" | jq
+```
 
 If GitHub is configured, open the draft PR in the browser — emphasize **draft**, not merge.
 

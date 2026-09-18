@@ -63,6 +63,7 @@ Cases live in `evals/cases.json`. CI fails if the pass rate drops.
 | Method | Path | Purpose |
 |--------|------|---------|
 | POST | `/v1/runs` | enqueue a coding run |
-| GET | `/v1/runs/{id}` | status, steps, draft PR |
+| GET | `/v1/runs/{id}` | status, steps, draft PR, latency/cost |
+| GET | `/v1/traces` | recent run traces + cost rollup |
 | POST | `/v1/runs/{id}/approval` | human approve/reject |
 | GET | `/v1/audit` | tenant audit trail |

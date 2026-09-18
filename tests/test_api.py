@@ -110,6 +110,14 @@ def test_happy_path_approve(client: TestClient, monkeypatch: pytest.MonkeyPatch)
     assert got["pr_url"]
     assert got["pr_mode"] == "local"
     assert any(s["name"] == "draft_pr" for s in got["steps"])
+    assert got["latency_ms"] >= 0
+    assert got["estimated_cost_usd"] > 0
+    assert all("latency_ms" in s for s in got["steps"])
+
+    traces = client.get("/v1/traces", headers={"Authorization": "Bearer dev-key"}).json()
+    assert traces["count"] >= 1
+    assert traces["total_estimated_cost_usd"] > 0
+    assert traces["traces"][0]["run_id"] == run_id
 
     approved = client.post(
         f"/v1/runs/{run_id}/approval",

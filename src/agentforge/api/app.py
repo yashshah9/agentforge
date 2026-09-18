@@ -42,6 +42,8 @@ class RunResponse(BaseModel):
     pr_url: str | None
     pr_mode: str | None
     error: str | None
+    latency_ms: int
+    estimated_cost_usd: float
 
     @classmethod
     def from_run(cls, run: Run) -> RunResponse:
@@ -52,7 +54,15 @@ class RunResponse(BaseModel):
             repo_url=run.repo_url,
             status=run.status,
             plan=run.plan,
-            steps=[{"name": s.name, "status": s.status, "detail": s.detail} for s in run.steps],
+            steps=[
+                {
+                    "name": s.name,
+                    "status": s.status,
+                    "detail": s.detail,
+                    "latency_ms": s.latency_ms,
+                }
+                for s in run.steps
+            ],
             patch_summary=run.patch_summary,
             test_exit_code=run.test_exit_code,
             test_stdout=run.test_stdout,
@@ -62,6 +72,8 @@ class RunResponse(BaseModel):
             pr_url=run.pr_url,
             pr_mode=run.pr_mode,
             error=run.error,
+            latency_ms=run.latency_ms,
+            estimated_cost_usd=run.estimated_cost_usd,
         )
 
 
@@ -84,7 +96,7 @@ def require_principal(token: Annotated[str, Depends(_bearer_token)]) -> Principa
 
 
 @app.get("/health")
-def health() -> dict[str, str]:
+def health() -> dict[str, Any]:
     return {
         "status": "ok",
         "version": __version__,
@@ -92,6 +104,46 @@ def health() -> dict[str, str]:
         "audit": settings.audit_driver,
         "queue": settings.queue_driver,
         "agentbox_url": settings.agentbox_url,
+        "runs": len(store.list_recent(limit=500)),
+    }
+
+
+@app.get("/v1/traces")
+def list_traces(
+    principal: Annotated[Principal, Depends(require_principal)],
+    limit: int = 20,
+) -> dict[str, Any]:
+    tenant_id = principal.tenant_id or principal.id
+    limit = max(1, min(limit, 100))
+    if "admin" in principal.roles:
+        runs = store.list_recent(limit=limit)
+    else:
+        runs = sorted(
+            store.list_for_tenant(tenant_id),
+            key=lambda r: r.updated_at,
+            reverse=True,
+        )[:limit]
+    total_cost = sum(r.estimated_cost_usd for r in runs)
+    return {
+        "count": len(runs),
+        "total_estimated_cost_usd": round(total_cost, 6),
+        "traces": [
+            {
+                "run_id": r.id,
+                "status": r.status.value,
+                "repo_url": r.repo_url,
+                "latency_ms": r.latency_ms,
+                "estimated_cost_usd": r.estimated_cost_usd,
+                "step_count": len(r.steps),
+                "steps": [
+                    {"name": s.name, "status": s.status, "latency_ms": s.latency_ms}
+                    for s in r.steps
+                ],
+                "pr_mode": r.pr_mode,
+                "test_exit_code": r.test_exit_code,
+            }
+            for r in runs
+        ],
     }
 
 
