@@ -40,6 +40,15 @@ Token sources: classic/fine-grained PAT, or a GitHub App **installation token** 
 
 Set `AGENTFORGE_INLINE_WORKER=false` for deterministic tests that call `process_once` / `drain` explicitly. Docker compose uses the same serve entrypoint (Redis queue + inline worker).
 
+## Run store
+
+| Driver | Behavior |
+|--------|----------|
+| `memory` | in-process only (default / unit tests) |
+| `postgres` | `agentforge_runs` table; save on create/update; `get`/`load` hydrate; `POST /v1/admin/reload` rehydrates |
+
+Compose sets `AGENTFORGE_STORE_DRIVER=postgres` so API and any worker process share durable run state.
+
 ## Observability
 
 Every pipeline run records:

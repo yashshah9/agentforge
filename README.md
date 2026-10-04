@@ -68,3 +68,6 @@ Cases live in `evals/cases.json`. CI fails if the pass rate drops.
 | GET | `/v1/traces` | recent run traces + cost rollup |
 | POST | `/v1/runs/{id}/approval` | human approve/reject |
 | GET | `/v1/audit` | tenant audit trail |
+| POST | `/v1/admin/reload` | rehydrate runs from durable store (admin) |
+
+Run persistence: `AGENTFORGE_STORE_DRIVER=memory|postgres` (compose uses postgres).

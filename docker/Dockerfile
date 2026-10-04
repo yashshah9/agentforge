@@ -8,7 +8,7 @@ COPY platformkit /deps/platformkit
 COPY agentforge /app
 WORKDIR /app
 RUN pip install --no-cache-dir "/deps/platformkit[postgres,redis]" \
-    && pip install --no-cache-dir .
+    && pip install --no-cache-dir ".[postgres]"
 ENV AGENTFORGE_FIXTURES_ROOT=/app/fixtures
 EXPOSE 8090
 HEALTHCHECK CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8090/health')"

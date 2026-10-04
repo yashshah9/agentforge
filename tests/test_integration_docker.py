@@ -50,6 +50,7 @@ def test_docker_health_drivers() -> None:
     # compose defaults
     assert body["queue"] == "redis"
     assert body["audit"] == "postgres"
+    assert body["store"] == "postgres"
 
 
 def test_docker_end_to_end_sandbox_fix_and_approve() -> None:

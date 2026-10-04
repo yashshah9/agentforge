@@ -23,6 +23,7 @@ def client(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClie
     app_module.settings.auth_driver = "api_key"
     app_module.settings.audit_driver = "memory"
     app_module.settings.queue_driver = "memory"
+    app_module.settings.store_driver = "memory"
     app_module.settings.api_keys = "dev-key:demo-tenant,other-key:other-tenant"
     app_module.settings.admin_keys = "admin-key"
     app_module.settings.work_root = str(tmp_path / "work")
@@ -249,6 +250,53 @@ def test_orphan_run_is_requeued(tmp_path: Path) -> None:
     assert msg is not None
     assert msg["run_id"] == "missing-run"
     assert msg["_orphan_retries"] == 1
+
+
+def test_durable_backend_get_roundtrip() -> None:
+    """Separate-process worker contract: create persists; empty memory can reload."""
+    from agentforge.domain.runs import Run, RunStore
+
+    class FakeBackend:
+        def __init__(self) -> None:
+            self.rows: dict[str, Run] = {}
+
+        def ensure_schema(self) -> None:
+            return None
+
+        def save_run(self, run: Run) -> None:
+            self.rows[run.id] = run
+
+        def get_run(self, run_id: str) -> Run | None:
+            return self.rows.get(run_id)
+
+        def load_recent(self, *, limit: int = 500) -> list[Run]:
+            return list(self.rows.values())[:limit]
+
+        def clear(self) -> None:
+            self.rows.clear()
+
+    backend = FakeBackend()
+    writer = RunStore(backend=backend)
+    created = writer.create(tenant_id="t1", issue="fix", repo_url="fixture://broken_counter")
+    assert created.id in backend.rows
+
+    reader = RunStore(backend=backend)
+    assert reader.get(created.id) is not None
+    assert reader.get(created.id).issue == "fix"  # type: ignore[union-attr]
+    reader.reset_memory()
+    assert created.id not in reader._runs
+    assert reader.load() == 1
+    assert reader.get(created.id) is not None
+
+
+def test_admin_reload_noop_without_backend(client: TestClient) -> None:
+    denied = client.post("/v1/admin/reload", headers={"Authorization": "Bearer dev-key"})
+    assert denied.status_code == 403
+    ok = client.post("/v1/admin/reload", headers={"Authorization": "Bearer admin-key"})
+    assert ok.status_code == 200
+    body = ok.json()
+    assert body["status"] == "noop"
+    assert body["store"] == "memory"
 
 
 def test_health_reports_queue_depth(client: TestClient) -> None:

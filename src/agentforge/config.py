@@ -18,6 +18,7 @@ class Settings(BaseSettings):
     queue_driver: str = "memory"
     redis_url: str = "redis://localhost:6379/0"
     postgres_dsn: str = "postgresql://postgres:postgres@localhost:5432/agentforge"
+    store_driver: str = "memory"  # memory | postgres
     agentbox_url: str = "http://127.0.0.1:8080"
     work_root: str = "/tmp/agentforge-work"
     sandbox_timeout_seconds: int = 30

@@ -15,14 +15,14 @@ from pydantic import BaseModel, Field
 
 from agentforge.__version__ import __version__
 from agentforge.config import Settings
-from agentforge.domain.runs import Run, RunStatus, RunStore
+from agentforge.domain.runs import Run, RunStatus
+from agentforge.domain.store_factory import build_store
 from agentforge.platform import build_kit
 from agentforge.worker.loop import start_inline_worker, stop_inline_worker
 
 settings = Settings()
 kit = build_kit(settings)
-store = RunStore()
-
+store = build_store(settings)
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
@@ -137,12 +137,12 @@ def health() -> dict[str, Any]:
         "auth": settings.auth_driver,
         "audit": settings.audit_driver,
         "queue": settings.queue_driver,
+        "store": settings.store_driver,
         "queue_depth": depth,
         "inline_worker": settings.inline_worker,
         "agentbox_url": settings.agentbox_url,
         "runs": len(store.list_recent(limit=500)),
     }
-
 
 @app.get("/v1/traces")
 def list_traces(
@@ -284,3 +284,26 @@ def list_audit(
         }
         for e in events
     ]
+
+
+@app.post("/v1/admin/reload")
+def reload_store(
+    principal: Annotated[Principal, Depends(require_principal)],
+) -> dict[str, Any]:
+    """Drop in-memory runs and rehydrate from durable backend (if configured)."""
+    if "admin" not in principal.roles:
+        raise HTTPException(status_code=403, detail="admin required")
+    if store.backend is None:
+        return {
+            "status": "noop",
+            "store": settings.store_driver,
+            "runs": len(store.list_recent(limit=500)),
+            "detail": "no durable backend; memory store left intact",
+        }
+    store.reset_memory()
+    loaded = store.load()
+    return {
+        "status": "reloaded",
+        "store": settings.store_driver,
+        "runs": loaded,
+    }

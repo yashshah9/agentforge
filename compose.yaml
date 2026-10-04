@@ -46,6 +46,7 @@ services:
       AGENTFORGE_AUTH_DRIVER: api_key
       AGENTFORGE_AUDIT_DRIVER: postgres
       AGENTFORGE_QUEUE_DRIVER: redis
+      AGENTFORGE_STORE_DRIVER: postgres
       AGENTFORGE_REDIS_URL: redis://redis:6379/0
       AGENTFORGE_POSTGRES_DSN: postgresql://postgres:postgres@postgres:5432/agentforge
       AGENTFORGE_API_KEYS: "dev-key:demo-tenant,other-key:other-tenant"

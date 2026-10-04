@@ -56,11 +56,20 @@ class Run:
 
 
 class RunStore:
-    """Thread-safe in-process store (API + worker share one process in Docker)."""
+    """Thread-safe run store with optional durable backend."""
 
-    def __init__(self) -> None:
+    def __init__(self, backend: Any | None = None) -> None:
         self._runs: dict[str, Run] = {}
         self._lock = Lock()
+        self.backend = backend
+
+    def load(self) -> int:
+        if self.backend is None:
+            return 0
+        loaded = self.backend.load_recent(limit=500)
+        with self._lock:
+            self._runs = {r.id: r for r in loaded}
+        return len(loaded)
 
     def create(self, *, tenant_id: str, issue: str, repo_url: str) -> Run:
         run = Run(
@@ -69,17 +78,38 @@ class RunStore:
             issue=issue,
             repo_url=repo_url,
         )
+        # Persist first so a separate worker process can load by id.
+        if self.backend is not None:
+            self.backend.save_run(run)
         with self._lock:
             self._runs[run.id] = run
         return run
 
     def get(self, run_id: str) -> Run | None:
         with self._lock:
-            return self._runs.get(run_id)
+            hit = self._runs.get(run_id)
+            if hit is not None:
+                return hit
+        if self.backend is not None:
+            found: Run | None = self.backend.get_run(run_id)
+            if found is not None:
+                with self._lock:
+                    self._runs[found.id] = found
+                return found
+        return None
+
+    def _persist(self, run: Run) -> None:
+        if self.backend is not None:
+            self.backend.save_run(run)
 
     def update(self, run_id: str, **fields: object) -> Run | None:
         with self._lock:
             run = self._runs.get(run_id)
+            if run is None and self.backend is not None:
+                loaded = self.backend.get_run(run_id)
+                if loaded is not None:
+                    self._runs[run_id] = loaded
+                    run = loaded
             if run is None:
                 return None
             for key, value in fields.items():
@@ -87,7 +117,9 @@ class RunStore:
                     raise AttributeError(key)
                 setattr(run, key, value)
             run.updated_at = datetime.now(UTC)
-            return run
+            out = run
+        self._persist(out)
+        return out
 
     def transition(
         self,
@@ -99,6 +131,11 @@ class RunStore:
         """Atomically update only if current status matches `from_status`."""
         with self._lock:
             run = self._runs.get(run_id)
+            if run is None and self.backend is not None:
+                loaded = self.backend.get_run(run_id)
+                if loaded is not None:
+                    self._runs[run_id] = loaded
+                    run = loaded
             if run is None or run.status != from_status:
                 return None
             for key, value in fields.items():
@@ -106,16 +143,25 @@ class RunStore:
                     raise AttributeError(key)
                 setattr(run, key, value)
             run.updated_at = datetime.now(UTC)
-            return run
+            out = run
+        self._persist(out)
+        return out
 
     def append_step(self, run_id: str, step: RunStep) -> Run | None:
         with self._lock:
             run = self._runs.get(run_id)
+            if run is None and self.backend is not None:
+                loaded = self.backend.get_run(run_id)
+                if loaded is not None:
+                    self._runs[run_id] = loaded
+                    run = loaded
             if run is None:
                 return None
             run.steps.append(step)
             run.updated_at = datetime.now(UTC)
-            return run
+            out = run
+        self._persist(out)
+        return out
 
     def list_for_tenant(self, tenant_id: str) -> list[Run]:
         with self._lock:
@@ -126,6 +172,13 @@ class RunStore:
             runs = sorted(self._runs.values(), key=lambda r: r.updated_at, reverse=True)
             return runs[: max(1, limit)]
 
+    def reset_memory(self) -> None:
+        """Drop in-process cache only (durable backend untouched)."""
+        with self._lock:
+            self._runs.clear()
+
     def clear(self) -> None:
         with self._lock:
             self._runs.clear()
+            if self.backend is not None:
+                self.backend.clear()

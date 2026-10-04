@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "agentforge"
-version = "0.5.2"
+version = "0.6.0"
 description = "Multi-agent software engineering harness with sandboxed execution and human approval"
 readme = "README.md"
 license = "MIT"
@@ -27,12 +27,14 @@ Issues = "https://github.com/yashshah9/agentforge/issues"
 
 [project.optional-dependencies]
 sandbox = ["agentbox-sandbox>=0.6.0"]
+postgres = ["psycopg[binary]>=3.1"]
 dev = [
     "pytest>=8.0",
     "httpx>=0.27",
     "ruff>=0.4",
     "mypy>=1.9",
     "platformkit[dev]",
+    "agentforge[postgres]",
 ]
 
 [project.scripts]
